@@ -1,0 +1,11 @@
+# C++ Binaries
+rrt_engine
+rrt_engine.exe
+*.o
+*.obj
+
+# Python
+__pycache__/
+*.py[cod]
+*.png
+.DS_Store

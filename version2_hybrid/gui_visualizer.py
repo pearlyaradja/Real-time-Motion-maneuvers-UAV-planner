@@ -36,8 +36,25 @@ import socket
 import subprocess
 import sys
 import threading
-import tkinter as tk
-from tkinter import messagebox, ttk
+
+# Check for graphical display environment on Linux/Unix systems
+if os.name == 'posix' and sys.platform != 'darwin' and not os.environ.get('DISPLAY'):
+    print("\n[!] Error: No graphical display detected (DISPLAY variable is missing).")
+    print("    This visualizer requires a GUI environment to run.")
+    print("    - If using SSH: connect with 'ssh -X'.")
+    print("    - If on WSL: ensure an X server (like GWSL) is running.")
+    print("    - To run the planner headlessly, use the C++ engine: './rrt_engine 90 90 20'\n")
+    sys.exit(1)
+
+try:
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+except ImportError:
+    print("Error: Tkinter not found. Please install it (e.g., sudo apt install python3-tk)")
+    sys.exit(1)
+except Exception as e:
+    print(f"Error initializing GUI: {e}")
+    sys.exit(1)
 
 import matplotlib
 matplotlib.use("TkAgg")  # Embed matplotlib inside the Tk window.
@@ -115,6 +132,8 @@ def parse_path(payload):
         return None
     pts = []
     for chunk in payload.split(";"):
+        if not chunk.strip():
+            continue
         parts = chunk.split(",")
         if len(parts) != 3:
             continue

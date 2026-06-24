@@ -41,12 +41,20 @@
 
 // ----------------------------- Socket headers ------------------------------ #
 #if defined(_WIN32)
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+  #endif
   #include <winsock2.h>
   #include <ws2tcpip.h>
   #pragma comment(lib, "ws2_32.lib")
   using socklen_t = int;
 #else
+  #define INVALID_SOCKET -1
   #include <arpa/inet.h>
+  #include <netinet/in.h>
   #include <sys/socket.h>
   #include <unistd.h>
 #endif
@@ -59,7 +67,7 @@ static const double Z_MAX            = 30.0;   // Airspace ceiling (m)
 static const double STEP_SIZE        = 5.0;    // Max expansion per iteration (m)
 static const double GOAL_SAMPLE_RATE = 0.10;   // Goal-bias probability (10%)
 static const double GOAL_THRESHOLD   = 5.0;    // Goal-reached distance (m)
-static const int    MAX_ITER         = 200;    // Iteration budget
+static const int    MAX_ITER         = 3000;   // Iteration budget (increased for better success rate)
 static const double INFLATION        = 1.5;    // Obstacle inflation buffer (m)
 
 static const char* UDP_HOST = "127.0.0.1";
@@ -231,8 +239,14 @@ static bool send_udp(const std::string& payload) {
         return false;
     }
 #endif
-    int sock = static_cast<int>(socket(AF_INET, SOCK_DGRAM, 0));
-    if (sock < 0) {
+
+#if defined(_WIN32)
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
+#else
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+#endif
+
+    if (sock == INVALID_SOCKET) {
         std::cerr << "socket() failed\n";
         return false;
     }
@@ -242,9 +256,9 @@ static bool send_udp(const std::string& payload) {
     dest.sin_port   = htons(UDP_PORT);
     inet_pton(AF_INET, UDP_HOST, &dest.sin_addr);
 
-    ssize_t sent = sendto(sock, payload.c_str(),
-                          static_cast<int>(payload.size()), 0,
-                          reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+    int sent = sendto(sock, payload.c_str(),
+                       static_cast<int>(payload.size()), 0,
+                       reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
 
 #if defined(_WIN32)
     closesocket(sock);
