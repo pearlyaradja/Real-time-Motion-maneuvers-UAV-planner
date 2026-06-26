@@ -67,7 +67,8 @@ static const double Z_MAX            = 30.0;   // Airspace ceiling (m)
 static const double STEP_SIZE        = 5.0;    // Max expansion per iteration (m)
 static const double GOAL_SAMPLE_RATE = 0.10;   // Goal-bias probability (10%)
 static const double GOAL_THRESHOLD   = 5.0;    // Goal-reached distance (m)
-static const int    MAX_ITER         = 3000;   // Iteration budget (increased for better success rate)
+static const int    MAX_ITER         = 10000;  // High iteration budget for complex maze
+static const double COLLISION_SAMPLE_STEP = 0.5; // Step size for collision checking (m)
 static const double INFLATION        = 1.5;    // Obstacle inflation buffer (m)
 
 static const char* UDP_HOST = "127.0.0.1";
@@ -79,9 +80,12 @@ struct Box {
 };
 
 static const std::vector<Box> OBSTACLES = {
-    {20.0, 20.0,  0.0, 40.0, 40.0, 25.0},
-    {60.0, 50.0,  0.0, 75.0, 70.0, 30.0},
-    {45.0, 10.0,  0.0, 55.0, 60.0, 15.0},
+    {20.0,  0.0,  0.0, 25.0, 96.0, 30.0},
+    {32.0, 40.0,  0.0, 38.0, 60.0, 30.0},
+    {45.0,  4.0,  0.0, 50.0, 100.0, 30.0},
+    {57.0, 40.0,  0.0, 63.0, 60.0, 30.0},
+    {70.0,  0.0,  0.0, 75.0, 96.0, 30.0},
+    {82.0,  4.0,  0.0, 87.0, 100.0, 30.0},
 };
 
 // ------------------------------- Node structure ---------------------------- #
@@ -101,7 +105,7 @@ static double rand_uniform(double lo, double hi) {
 
 // ------------------------------- Core functions ---------------------------- #
 // Euclidean distance (hitung jarak = "compute distance").
-static double hitung_jarak(const Node& a, const Node& b) {
+static double compute_distance(const Node& a, const Node& b) {
     double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
@@ -119,9 +123,9 @@ static Node get_random_node(const Node& goal) {
 // Index of the node nearest to rnd.
 static int get_nearest_node_id(const std::vector<Node>& nodes, const Node& rnd) {
     int best = 0;
-    double best_d = hitung_jarak(nodes[0], rnd);
+    double best_d = compute_distance(nodes[0], rnd);
     for (size_t i = 1; i < nodes.size(); ++i) {
-        double d = hitung_jarak(nodes[i], rnd);
+        double d = compute_distance(nodes[i], rnd);
         if (d < best_d) { best_d = d; best = static_cast<int>(i); }
     }
     return best;
@@ -131,7 +135,7 @@ static int get_nearest_node_id(const std::vector<Node>& nodes, const Node& rnd) 
 // Isolated so the linear block can later be swapped for a motion-primitives LUT.
 static Node steer(const std::vector<Node>& nodes, int from_id, const Node& to) {
     const Node& from = nodes[from_id];
-    double dist = hitung_jarak(from, to);
+    double dist = compute_distance(from, to);
     Node nn;
 
     if (dist <= STEP_SIZE) {
@@ -145,7 +149,7 @@ static Node steer(const std::vector<Node>& nodes, int from_id, const Node& to) {
                   from_id, 0.0};
         // ------------------------------------------------------------------- //
     }
-    nn.cost = from.cost + hitung_jarak(from, nn);
+    nn.cost = from.cost + compute_distance(from, nn);
     return nn;
 }
 
@@ -158,8 +162,8 @@ static bool point_in_inflated_box(double x, double y, double z, const Box& b) {
 
 // Densely sample the segment; true if entirely collision-free.
 static bool check_collision(const Node& from, const Node& to) {
-    double dist = hitung_jarak(from, to);
-    int steps = std::max(2, static_cast<int>(dist / 0.5));
+    double dist = compute_distance(from, to);
+    int steps = std::max(2, static_cast<int>(dist / COLLISION_SAMPLE_STEP));
     for (int i = 0; i <= steps; ++i) {
         double t = static_cast<double>(i) / steps;
         double x = from.x + (to.x - from.x) * t;
@@ -195,15 +199,15 @@ static std::vector<Node> plan(const Node& start, const Node& goal) {
         int  near_id = get_nearest_node_id(nodes, rnd);
         Node new_n   = steer(nodes, near_id, rnd);
 
-        if (!check_collision(nodes[near_id], new_n)) continue;
+        if (!check_collision(nodes[near_id], new_n)) continue; // type: ignore
         nodes.push_back(new_n);
         int new_id = static_cast<int>(nodes.size()) - 1;
 
-        if (hitung_jarak(new_n, goal) <= GOAL_THRESHOLD &&
+        if (compute_distance(new_n, goal) <= GOAL_THRESHOLD &&
             check_collision(new_n, goal)) {
             Node g = goal;
             g.parent = new_id;
-            g.cost   = new_n.cost + hitung_jarak(new_n, goal);
+            g.cost   = new_n.cost + compute_distance(new_n, goal);
             nodes.push_back(g);
             int goal_id = static_cast<int>(nodes.size()) - 1;
 
@@ -283,9 +287,9 @@ int main(int argc, char** argv) {
     Node goal {90.0, 90.0, 20.0, -1, 0.0};
 
     if (argc >= 4) {
-        goal.x = std::atof(argv[1]);
-        goal.y = std::atof(argv[2]);
-        goal.z = std::atof(argv[3]);
+        goal.x = std::stod(argv[1]);
+        goal.y = std::stod(argv[2]);
+        goal.z = std::stod(argv[3]);
     }
     std::cout << "Goal = (" << goal.x << ", " << goal.y << ", " << goal.z << ")\n";
 

@@ -71,13 +71,25 @@ INFLATION = 1.5
 UDP_HOST, UDP_PORT = "127.0.0.1", 5005
 
 OBSTACLES = [
-    (20.0, 20.0,  0.0, 40.0, 40.0, 25.0),
-    (60.0, 50.0,  0.0, 75.0, 70.0, 30.0),
-    (45.0, 10.0,  0.0, 55.0, 60.0, 15.0),
+    (20.0,  0.0,  0.0, 25.0, 96.0, 30.0),
+    (32.0, 40.0,  0.0, 38.0, 60.0, 30.0),
+    (45.0,  4.0,  0.0, 50.0, 100.0, 30.0),
+    (57.0, 40.0,  0.0, 63.0, 60.0, 30.0),
+    (70.0,  0.0,  0.0, 75.0, 96.0, 30.0),
+    (82.0,  4.0,  0.0, 87.0, 100.0, 30.0),
 ]
 
 START = (5.0, 5.0, 5.0)
 
+
+# UI and Rendering Constants
+POLL_INTERVAL_MS = 100  # How often to poll the UDP message queue (ms)
+ENGINE_TIMEOUT_SECONDS = 30 # Max time to wait for the C++ engine to respond
+ERROR_PREFIX = "__ERR__" # Prefix for internal error messages from engine thread
+FIGURE_SIZE = (8, 6)
+FIGURE_DPI = 100
+VIEW_ELEV = 28
+VIEW_AZIM = -58
 
 def engine_path():
     """Locate the compiled engine binary next to this script."""
@@ -161,7 +173,7 @@ class GroundControlApp:
         # Poll the queue on the main thread (~10 Hz). All Tk/matplotlib calls
         # MUST happen here, never inside the listener thread.
         self.root.after(100, self._poll_queue)
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close) # type: ignore
 
     # ----------------------------- UI layout ------------------------------- #
     def _build_controls(self):
@@ -188,7 +200,7 @@ class GroundControlApp:
         self.status.pack(side=tk.LEFT, padx=10)
 
     def _build_canvas(self):
-        self.fig = Figure(figsize=(8, 6), dpi=100)
+        self.fig = Figure(figsize=FIGURE_SIZE, dpi=FIGURE_DPI)
         self.ax = self.fig.add_subplot(111, projection="3d")
 
         frame = ttk.Frame(self.root)
@@ -237,10 +249,10 @@ class GroundControlApp:
         try:
             proc = subprocess.run(
                 [exe, str(gx), str(gy), str(gz)],
-                capture_output=True, text=True, timeout=30)
+                capture_output=True, text=True, timeout=ENGINE_TIMEOUT_SECONDS)
             if proc.returncode != 0:
-                self.msg_queue.put(f"__ERR__Engine exited with code "
-                                   f"{proc.returncode}: {proc.stderr.strip()}")
+                self.msg_queue.put(f"{ERROR_PREFIX}Engine exited with code "
+                                   f"{proc.returncode}: {proc.stderr.strip()}") # type: ignore
         except subprocess.TimeoutExpired:
             self.msg_queue.put("__ERR__Engine timed out.")
         except OSError as exc:
@@ -250,8 +262,8 @@ class GroundControlApp:
         """Drain the listener queue on the main thread and react to messages."""
         try:
             while True:
-                payload = self.msg_queue.get_nowait()
-                if payload.startswith("__ERR__"):
+                payload: str = self.msg_queue.get_nowait()
+                if payload.startswith(ERROR_PREFIX):
                     self._finish(error=payload[len("__ERR__"):])
                 else:
                     self._handle_payload(payload)
@@ -259,7 +271,7 @@ class GroundControlApp:
             pass
         self.root.after(100, self._poll_queue)
 
-    def _handle_payload(self, payload):
+    def _handle_payload(self, payload: str):
         path = parse_path(payload)
         if path is None:
             self._finish(error="Engine reported no feasible path (FAIL).")
@@ -276,7 +288,7 @@ class GroundControlApp:
 
     # ----------------------------- Rendering ------------------------------- #
     @staticmethod
-    def _draw_box(ax, box, color="dimgray", alpha=0.75, buffer=0.0):
+    def _draw_box(ax, box, color: str = "dimgray", alpha: float = 0.75, buffer: float = 0.0):
         x_min, y_min, z_min, x_max, y_max, z_max = box
         x_min -= buffer; y_min -= buffer; z_min -= buffer
         x_max += buffer; y_max += buffer; z_max += buffer
@@ -294,7 +306,7 @@ class GroundControlApp:
         ax.add_collection3d(Poly3DCollection(
             faces, facecolors=color, edgecolors="k", linewidths=0.4, alpha=alpha))
 
-    def _draw_scene(self, path):
+    def _draw_scene(self, path: list | None):
         self.ax.clear()
 
         # Obstacles + faint inflated clearance shell.
@@ -323,8 +335,8 @@ class GroundControlApp:
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_zlabel("Z (m)")
-        self.ax.set_title("3D RRT UAV Motion Planner")
-        self.ax.view_init(elev=28, azim=-58)
+        self.ax.set_title("3D RRT UAV Motion Planner") # type: ignore
+        self.ax.view_init(elev=VIEW_ELEV, azim=VIEW_AZIM) # type: ignore
         if path:
             self.ax.legend(loc="upper left")
         self.canvas.draw()

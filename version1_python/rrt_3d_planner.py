@@ -37,14 +37,23 @@ Z_MAX = 30.0             # Airspace ceiling (metres)
 STEP_SIZE = 5.0          # Maximum expansion distance per iteration (metres)
 GOAL_SAMPLE_RATE = 0.10  # Probability of sampling the goal directly (10%)
 GOAL_THRESHOLD = 5.0     # Distance at which the goal counts as reached (metres)
-MAX_ITER = 200           # Iteration budget
+MAX_ITER = 10000         # High budget for extremely complex zig-zag slalom
 INFLATION = 1.5          # Obstacle inflation buffer for clearance (metres)
+
+# Internal Constants
+COLLISION_SAMPLE_STEP = 0.5 # Step size for collision checking (metres)
+BOX_ALPHA_SOLID = 0.75
+BOX_ALPHA_INFLATED = 0.08
+VIS_FIG_SIZE = (11, 8)
 
 # Obstacle list. Each cuboid is (x_min, y_min, z_min, x_max, y_max, z_max).
 OBSTACLES = [
-    (20.0, 20.0,  0.0, 40.0, 40.0, 25.0),
-    (60.0, 50.0,  0.0, 75.0, 70.0, 30.0),
-    (45.0, 10.0,  0.0, 55.0, 60.0, 15.0),
+    (20.0,  0.0,  0.0, 25.0, 96.0, 30.0),  # Wall 1: Gap at the very top
+    (32.0, 40.0,  0.0, 38.0, 60.0, 30.0),  # Mid Pillar 1
+    (45.0,  4.0,  0.0, 50.0, 100.0, 30.0), # Wall 2: Gap at the very bottom
+    (57.0, 40.0,  0.0, 63.0, 60.0, 30.0),  # Mid Pillar 2
+    (70.0,  0.0,  0.0, 75.0, 96.0, 30.0),  # Wall 3: Gap at the top
+    (82.0,  4.0,  0.0, 87.0, 100.0, 30.0), # Wall 4: Gap at the bottom
 ]
 
 
@@ -65,7 +74,7 @@ class Node:
 # --------------------------------------------------------------------------- #
 #  Core RRT functions
 # --------------------------------------------------------------------------- #
-def hitung_jarak(node_a, node_b):
+def compute_distance(node_a, node_b):
     """Euclidean distance between two nodes (hitung jarak = 'compute distance')."""
     return math.sqrt(
         (node_a.x - node_b.x) ** 2
@@ -92,7 +101,7 @@ def get_random_node(goal):
 
 def get_nearest_node_id(node_list, rnd_node):
     """Return the index of the node in `node_list` closest to `rnd_node`."""
-    distances = [hitung_jarak(n, rnd_node) for n in node_list]
+    distances = [compute_distance(n, rnd_node) for n in node_list]
     return distances.index(min(distances))
 
 
@@ -107,8 +116,8 @@ def steer(from_node, to_node, step=STEP_SIZE):
     a motion-primitives look-up table, replace ONLY the interpolation block
     below with a primitive lookup that returns the reachable end-state; the rest
     of the RRT pipeline stays untouched.
-    """
-    dist = hitung_jarak(from_node, to_node)
+    """ # type: ignore
+    dist = compute_distance(from_node, to_node)
 
     if dist <= step:
         # Target is within a single step: snap straight to it.
@@ -123,7 +132,7 @@ def steer(from_node, to_node, step=STEP_SIZE):
         # ----------------------------------------------------------------- #
 
     new_node.parent = from_node
-    new_node.cost = from_node.cost + hitung_jarak(from_node, new_node)
+    new_node.cost = from_node.cost + compute_distance(from_node, new_node)
     return new_node
 
 
@@ -145,8 +154,8 @@ def check_collision(from_node, to_node, obstacles=OBSTACLES):
     The segment is densely sampled (~every 0.5 m) so thin obstacles cannot be
     tunnelled through.
     """
-    dist = hitung_jarak(from_node, to_node)
-    steps = max(2, int(dist / 0.5))
+    dist = compute_distance(from_node, to_node)
+    steps = max(2, int(dist / COLLISION_SAMPLE_STEP))
     for i in range(steps + 1):
         t = i / steps
         x = from_node.x + (to_node.x - from_node.x) * t
@@ -203,9 +212,9 @@ def plan(start, goal, seed=None):
         node_list.append(new_node)
 
         # 6. Goal test: connect to the goal if close enough and clear.
-        if hitung_jarak(new_node, goal) <= GOAL_THRESHOLD and check_collision(new_node, goal):
+        if compute_distance(new_node, goal) <= GOAL_THRESHOLD and check_collision(new_node, goal):
             goal.parent = new_node
-            goal.cost = new_node.cost + hitung_jarak(new_node, goal)
+            goal.cost = new_node.cost + compute_distance(new_node, goal)
             node_list.append(goal)
             path = extract_path(goal)
             print(f"[OK]  Goal reached at iteration {i + 1}  |  "
@@ -248,12 +257,12 @@ def _draw_box(ax, box, color="0.5", alpha=0.65, buffer=0.0):
 
 def visualise(node_list, path, start, goal, save_path=None):
     """Render the airspace, tree, obstacles, endpoints and the final path."""
-    fig = plt.figure(figsize=(11, 8))
+    fig = plt.figure(figsize=VIS_FIG_SIZE)
     ax = fig.add_subplot(111, projection="3d")
 
     # Obstacles: solid blocks (+ faint inflated shell to show the buffer).
     for box in OBSTACLES:
-        _draw_box(ax, box, color="dimgray", alpha=0.75)
+        _draw_box(ax, box, color="dimgray", alpha=BOX_ALPHA_SOLID)
         _draw_box(ax, box, color="orange", alpha=0.08, buffer=INFLATION)
 
     # Tree branches: light blue lines from each node to its parent.

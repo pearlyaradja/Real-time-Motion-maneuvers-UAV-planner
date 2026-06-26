@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D UAV Agile Maneuver Space Planner</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Mono&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Style Sheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Control Panel -->
+        <aside class="sidebar-panel">
+            <header class="app-header">
+                <i class="fa-solid fa-jet-fighter-up logo-icon"></i>
+                <div>
+                    <h1>UAV Agile Planner</h1>
+                    <p>Maneuver Space Simulation</p>
+                </div>
+            </header>
+
+            <div class="control-sections">
+                <!-- Section 1: Start & Goal Position -->
+                <section class="control-card">
+                    <h2><i class="fa-solid fa-location-crosshairs"></i> Mission Coordinates</h2>
+                    <div class="input-grid">
+                        <div class="input-group">
+                            <label>Start X (m)</label>
+                            <input type="number" id="startX" value="5" min="0" max="100" step="1">
+                        </div>
+                        <div class="input-group">
+                            <label>Start Y (m)</label>
+                            <input type="number" id="startY" value="5" min="0" max="100" step="1">
+                        </div>
+                        <div class="input-group">
+                            <label>Start Z (m)</label>
+                            <input type="number" id="startZ" value="2" min="0" max="30" step="1">
+                        </div>
+                        <div class="input-group">
+                            <label>Start Yaw (°)</label>
+                            <input type="number" id="startYaw" value="45" min="-180" max="180" step="5">
+                        </div>
+                    </div>
+                    <hr class="divider">
+                    <div class="input-grid">
+                        <div class="input-group">
+                            <label>Goal X (m)</label>
+                            <input type="number" id="goalX" value="90" min="0" max="100" step="1">
+                        </div>
+                        <div class="input-group">
+                            <label>Goal Y (m)</label>
+                            <input type="number" id="goalY" value="90" min="0" max="100" step="1">
+                        </div>
+                        <div class="input-group">
+                            <label>Goal Z (m)</label>
+                            <input type="number" id="goalZ" value="20" min="0" max="30" step="1">
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 2: UAV Limits & Kinematics -->
+                <section class="control-card">
+                    <h2><i class="fa-solid fa-sliders"></i> Kinematic Limits</h2>
+                    <div class="slider-group">
+                        <div class="slider-header">
+                            <label>Nominal Max Yaw / step</label>
+                            <span id="maxYawVal">35°</span>
+                        </div>
+                        <input type="range" id="maxYaw" min="10" max="90" value="35" step="5">
+                    </div>
+                    <div class="slider-group">
+                        <div class="slider-header">
+                            <label>Nominal Max Pitch / step</label>
+                            <span id="maxPitchVal">20°</span>
+                        </div>
+                        <input type="range" id="maxPitch" min="5" max="45" value="20" step="5">
+                    </div>
+                </section>
+
+                <!-- Section 3: Planner Parameters -->
+                <section class="control-card">
+                    <h2><i class="fa-solid fa-gears"></i> Planner Parameters</h2>
+                    <div class="input-grid">
+                        <div class="input-group">
+                            <label>Step Size (m)</label>
+                            <input type="number" id="stepSize" value="6.0" min="2.0" max="15.0" step="0.5">
+                        </div>
+                        <div class="input-group">
+                            <label>Goal Bias</label>
+                            <input type="number" id="goalBias" value="0.15" min="0.05" max="0.50" step="0.05">
+                        </div>
+                        <div class="input-group">
+                            <label>Goal Dist (m)</label>
+                            <input type="number" id="goalThreshold" value="6.0" min="2.0" max="10.0" step="0.5">
+                        </div>
+                        <div class="input-group">
+                            <label>Max Iterations</label>
+                            <input type="number" id="maxIter" value="2000" min="500" max="5000" step="100">
+                        </div>
+                    </div>
+                    <div class="slider-group mt-1">
+                        <div class="slider-header">
+                            <label>Safety Buffer (Inflation)</label>
+                            <span id="safetyBufferVal">1.5m</span>
+                        </div>
+                        <input type="range" id="safetyBuffer" min="0.5" max="3.0" value="1.5" step="0.1">
+                    </div>
+                    <div class="slider-group mt-1">
+                        <div class="slider-header">
+                            <label>Obstacle Count</label>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span id="obstacleCountVal">15</span>
+                                <button id="btnRandomizeObs" class="btn-icon" title="Randomize Obstacles"><i class="fa-solid fa-dice"></i></button>
+                            </div>
+                        </div>
+                        <input type="range" id="obstacleCount" min="0" max="40" value="15" step="1">
+                    </div>
+                </section>
+            </div>
+
+            <!-- Actions Panel -->
+            <div class="actions-panel">
+                <button id="btnRun" class="btn-primary"><i class="fa-solid fa-play"></i> Run Planner</button>
+                <button id="btnStep" class="btn-secondary"><i class="fa-solid fa-shoe-prints"></i> Animate Tree</button>
+                <button id="btnSimulate" class="btn-success" disabled><i class="fa-solid fa-plane-departure"></i> Fly UAV</button>
+                <button id="btnClear" class="btn-danger"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+            </div>
+        </aside>
+
+        <!-- Main Display Arena -->
+        <main class="display-arena">
+            <!-- Top Dashboard Stats -->
+            <section class="stats-dashboard">
+                <div class="stat-box">
+                    <span class="stat-label">Planner Status</span>
+                    <span id="statusVal" class="stat-value text-ready">READY</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Path Cost</span>
+                    <span id="costVal" class="stat-value">0.00 m</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Waypoints</span>
+                    <span id="waypointsVal" class="stat-value">0</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Tree Size</span>
+                    <span id="treeNodesVal" class="stat-value">0</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Time Elapsed</span>
+                    <span id="timeVal" class="stat-value">0 ms</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Efficiency</span>
+                    <span id="efficiencyVal" class="stat-value">0.0%</span>
+                </div>
+            </section>
+
+            <!-- 3D WebGL Canvas Container -->
+            <div class="canvas-wrapper">
+                <div id="threejs-canvas"></div>
+                <div class="canvas-overlay">
+                    <div class="view-indicator"><i class="fa-solid fa-cube"></i> Interactive 3D Arena</div>
+                    <div class="canvas-controls-help">
+                        <span><i class="fa-solid fa-mouse-pointer"></i> Drag to Rotate</span>
+                        <span><i class="fa-solid fa-arrows-to-eye"></i> Right-click to Pan</span>
+                        <span><i class="fa-solid fa-maximize"></i> Scroll to Zoom</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Waypoint Table Panel -->
+            <section class="table-panel">
+                <div class="table-header">
+                    <h2><i class="fa-solid fa-list-ol"></i> Flight Waypoints</h2>
+                    <span class="table-subtitle">Ordered list of motion primitive segments</span>
+                </div>
+                <div class="table-container">
+                    <table id="waypointTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>X (m)</th>
+                                <th>Y (m)</th>
+                                <th>Z (m)</th>
+                                <th>Heading (Yaw)</th>
+                                <th>dYaw</th>
+                                <th>dPitch</th>
+                                <th>Seg. Distance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td colspan="8" class="empty-table-msg">Run planner to generate waypoints</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Loaded Three.js and OrbitControls via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Custom Application Modules -->
+    <script src="planner.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
