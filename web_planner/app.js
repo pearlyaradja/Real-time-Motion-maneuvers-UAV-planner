@@ -1,7 +1,8 @@
 let scene, camera, renderer, controls;
 let obstaclesGroup, treeGroup, pathGroup, markersGroup;
-let uavModel = null;
+let uavModels = [];
 let treeNodes = [];
+let finalPaths = [];
 let finalPath = null;
 let isPlanning = false;
 let animationFrameId = null;
@@ -19,7 +20,8 @@ function initUI() {
         { id: 'maxYaw', valId: 'maxYawVal', suffix: '°' },
         { id: 'maxPitch', valId: 'maxPitchVal', suffix: '°' },
         { id: 'safetyBuffer', valId: 'safetyBufferVal', suffix: 'm' },
-        { id: 'obstacleCount', valId: 'obstacleCountVal', suffix: '' }
+        { id: 'obstacleCount', valId: 'obstacleCountVal', suffix: '' },
+        { id: 'uavCount', valId: 'uavCountVal', suffix: '' }
     ];
     sliders.forEach(s => {
         const sliderEl = document.getElementById(s.id);
@@ -45,6 +47,10 @@ function initUI() {
     document.getElementById('btnStep').addEventListener('click', runPlannerStepped);
     document.getElementById('btnSimulate').addEventListener('click', simulateFlight);
     document.getElementById('btnClear').addEventListener('click', resetSimulator);
+
+    document.getElementById('chkHideTree').addEventListener('change', (e) => {
+        treeGroup.visible = !e.target.checked;
+    });
 }
 
 function initThreeJS() {
@@ -159,7 +165,7 @@ function updateObstaclesBuffer(bufferSize) {
 }
 
 function generateRandomObstacles(count) {
-    OBSTACLES.length = 0; // Clear in-place
+    OBSTACLES.length = 0;
     const startX = parseFloat(document.getElementById('startX').value);
     const startY = parseFloat(document.getElementById('startY').value);
     const startZ = parseFloat(document.getElementById('startZ').value);
@@ -187,14 +193,12 @@ function generateRandomObstacles(count) {
         const zMin = 0.0;
         const zMax = h;
 
-        // Check if start overlaps
         const startOverlap = (
             (xMin - startBuf) <= startX && startX <= (xMax + startBuf) &&
             (yMin - startBuf) <= startY && startY <= (yMax + startBuf) &&
             (zMin - startBuf) <= startZ && startZ <= (zMax + startBuf)
         );
 
-        // Check if goal overlaps
         const goalOverlap = (
             (xMin - goalBuf) <= goalX && goalX <= (xMax + goalBuf) &&
             (yMin - goalBuf) <= goalY && goalY <= (yMax + goalBuf) &&
@@ -262,12 +266,15 @@ function resetSimulator() {
 
     while(treeGroup.children.length > 0) treeGroup.remove(treeGroup.children[0]);
     while(pathGroup.children.length > 0) pathGroup.remove(pathGroup.children[0]);
-    if (uavModel) {
-        scene.remove(uavModel);
-        uavModel = null;
-    }
+    uavModels.forEach(model => {
+        scene.remove(model);
+    });
+    uavModels = [];
     treeNodes = [];
+    finalPaths = [];
     finalPath = null;
+
+    treeGroup.visible = !document.getElementById('chkHideTree').checked;
 
     updateStatus('READY', 'text-ready');
     document.getElementById('costVal').textContent = '0.00 m';
@@ -280,6 +287,11 @@ function resetSimulator() {
     tbody.innerHTML = '<tr><td colspan="8" class="empty-table-msg">Run planner to generate waypoints</td></tr>';
     document.getElementById('btnSimulate').disabled = true;
 
+    const uavSelectContainer = document.getElementById('uavSelectContainer');
+    if (uavSelectContainer) {
+        uavSelectContainer.style.display = 'none';
+    }
+
     const conf = getPlannerConfig();
     drawStartGoalMarkers(conf.start, conf.goal);
 }
@@ -288,6 +300,7 @@ function runPlannerInstant() {
     resetSimulator();
     updateStatus('PLANNING...', 'text-planning');
     const conf = getPlannerConfig();
+    const uavCount = parseInt(document.getElementById('uavCount').value);
     const startTime = performance.now();
 
     if (!isNodeValid(conf.start, OBSTACLES, conf.safetyBuffer)) {
@@ -296,54 +309,69 @@ function runPlannerInstant() {
         return;
     }
 
-    treeNodes = [conf.start];
-    let bestGoalNode = null;
-    let minGoalCost = Infinity;
+    const pathColors = [0x00f0ff, 0xbd5eff, 0x39ff14, 0xff0055, 0xeab308, 0xff7700];
+    let totalNodesCount = 0;
+    let pathsFoundCount = 0;
 
-    for (let i = 0; i < conf.maxIter; i++) {
-        const rnd = getRandomNode(conf.goal, conf.goalBias);
-        const nearestId = getNearestNodeId(treeNodes, rnd);
-        const nearest = treeNodes[nearestId];
+    for (let uavIdx = 0; uavIdx < uavCount; uavIdx++) {
+        const localTreeNodes = [conf.start];
+        let bestGoalNode = null;
+        let minGoalCost = Infinity;
 
-        const candidates = generatePrimitives(nearest, conf.stepSize, conf.maxYaw, conf.maxPitch);
-        let bestCandidate = null;
-        let minDistToRnd = Infinity;
+        for (let i = 0; i < conf.maxIter; i++) {
+            const rnd = getRandomNode(conf.goal, conf.goalBias);
+            const nearestId = getNearestNodeId(localTreeNodes, rnd);
+            const nearest = localTreeNodes[nearestId];
 
-        for (const cand of candidates) {
-            if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer)) {
-                const d = hitungJarak(cand.candidate, rnd);
-                if (d < minDistToRnd) {
-                    minDistToRnd = d;
-                    bestCandidate = cand.candidate;
+            const candidates = generatePrimitives(nearest, conf.stepSize, conf.maxYaw, conf.maxPitch);
+            let bestCandidate = null;
+            let minDistToRnd = Infinity;
+
+            for (const cand of candidates) {
+                if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer)) {
+                    const d = hitungJarak(cand.candidate, rnd);
+                    if (d < minDistToRnd) {
+                        minDistToRnd = d;
+                        bestCandidate = cand.candidate;
+                    }
+                }
+            }
+            if (bestCandidate === null) continue;
+            localTreeNodes.push(bestCandidate);
+            drawTreeBranch(nearest, bestCandidate);
+
+            if (hitungJarak(bestCandidate, conf.goal) <= conf.goalThreshold) {
+                if (checkCollision(bestCandidate, conf.goal, OBSTACLES, conf.safetyBuffer)) {
+                    const cost = bestCandidate.cost + hitungJarak(bestCandidate, conf.goal);
+                    if (cost < minGoalCost) {
+                        minGoalCost = cost;
+                        bestGoalNode = new Node(conf.goal.x, conf.goal.y, conf.goal.z, bestCandidate.psi);
+                        bestGoalNode.parent = bestCandidate;
+                        bestGoalNode.cost = cost;
+                    }
                 }
             }
         }
-        if (bestCandidate === null) continue;
-        treeNodes.push(bestCandidate);
-        drawTreeBranch(nearest, bestCandidate);
 
-        if (hitungJarak(bestCandidate, conf.goal) <= conf.goalThreshold) {
-            if (checkCollision(bestCandidate, conf.goal, OBSTACLES, conf.safetyBuffer)) {
-                const cost = bestCandidate.cost + hitungJarak(bestCandidate, conf.goal);
-                if (cost < minGoalCost) {
-                    minGoalCost = cost;
-                    bestGoalNode = new Node(conf.goal.x, conf.goal.y, conf.goal.z, bestCandidate.psi);
-                    bestGoalNode.parent = bestCandidate;
-                    bestGoalNode.cost = cost;
-                }
-            }
+        if (bestGoalNode) {
+            localTreeNodes.push(bestGoalNode);
+            const path = extractPath(bestGoalNode);
+            finalPaths.push(path);
+            
+            const color = pathColors[uavIdx % pathColors.length];
+            drawOptimalPath(path, color);
+            pathsFoundCount++;
         }
+        totalNodesCount += localTreeNodes.length;
     }
 
     const elapsed = performance.now() - startTime;
-    if (bestGoalNode) {
-        treeNodes.push(bestGoalNode);
-        finalPath = extractPath(bestGoalNode);
-        drawOptimalPath(finalPath);
-        populateResults(elapsed);
+    if (pathsFoundCount > 0) {
+        treeGroup.visible = !document.getElementById('chkHideTree').checked;
+        populateResults(elapsed, totalNodesCount);
     } else {
         updateStatus('FAILED (NO PATH)', 'text-failed');
-        document.getElementById('treeNodesVal').textContent = treeNodes.length;
+        document.getElementById('treeNodesVal').textContent = totalNodesCount;
         document.getElementById('timeVal').textContent = Math.round(elapsed) + ' ms';
     }
 }
@@ -416,8 +444,10 @@ function runPlannerStepped() {
             if (bestGoalNode) {
                 treeNodes.push(bestGoalNode);
                 finalPath = extractPath(bestGoalNode);
-                drawOptimalPath(finalPath);
-                populateResults(elapsed);
+                finalPaths.push(finalPath);
+                treeGroup.visible = !document.getElementById('chkHideTree').checked;
+                drawOptimalPath(finalPath, 0x00f0ff);
+                populateResults(elapsed, treeNodes.length);
             } else {
                 updateStatus('FAILED (NO PATH)', 'text-failed');
                 document.getElementById('timeVal').textContent = Math.round(elapsed) + ' ms';
@@ -427,11 +457,11 @@ function runPlannerStepped() {
     step();
 }
 
-// Draw a single branch line of RRT tree
 function drawTreeBranch(fromNode, toNode) {
-    const points = [];
-    points.push(new THREE.Vector3(fromNode.x, fromNode.z, fromNode.y));
-    points.push(new THREE.Vector3(toNode.x, toNode.z, toNode.y));
+    const points = [
+        new THREE.Vector3(fromNode.x, fromNode.z, fromNode.y),
+        new THREE.Vector3(toNode.x, toNode.z, toNode.y)
+    ];
     const geom = new THREE.BufferGeometry().setFromPoints(points);
     const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
         color: 0x93c5fd,
@@ -441,15 +471,14 @@ function drawTreeBranch(fromNode, toNode) {
     treeGroup.add(line);
 }
 
-// Draw final neon blue optimal path
-function drawOptimalPath(path) {
+function drawOptimalPath(path, color = 0x00f0ff) {
     const points = [];
     path.forEach(node => {
         points.push(new THREE.Vector3(node.x, node.z, node.y));
     });
     const geom = new THREE.BufferGeometry().setFromPoints(points);
     const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
-        color: 0x00f0ff,
+        color: color,
         linewidth: 3
     }));
     pathGroup.add(line);
@@ -458,17 +487,15 @@ function drawOptimalPath(path) {
         const curve = new THREE.CatmullRomCurve3(points);
         const tubeGeom = new THREE.TubeGeometry(curve, 64, 0.4, 8, false);
         const tubeMat = new THREE.MeshBasicMaterial({
-            color: 0x0072ff,
+            color: color,
             transparent: true,
-            opacity: 0.25,
-            wireframe: false
+            opacity: 0.2
         });
-        const tube = new THREE.Mesh(tubeGeom, tubeMat);
-        pathGroup.add(tube);
+        const mesh = new THREE.Mesh(tubeGeom, tubeMat);
+        pathGroup.add(mesh);
     } catch(e) {}
 }
 
-// Generate Stylized 3D Airplane Mesh Model
 function createUavModel() {
     const uav = new THREE.Group();
     const bodyGeom = new THREE.CylinderGeometry(0.2, 0.2, 2.0, 8);
@@ -499,64 +526,120 @@ function createUavModel() {
     return uav;
 }
 
-// Animate UAV flight along path waypoints
 function simulateFlight() {
-    if (!finalPath || finalPath.length < 2) return;
+    if (finalPaths.length === 0) return;
     if (flightAnimationId) cancelAnimationFrame(flightAnimationId);
 
-    if (!uavModel) {
-        uavModel = createUavModel();
-        scene.add(uavModel);
+    uavModels.forEach(model => scene.remove(model));
+    uavModels = [];
+
+    const uavCount = parseInt(document.getElementById('uavCount').value);
+
+    for (let i = 0; i < uavCount; i++) {
+        const uav = createUavModel();
+        if (i > 0) {
+            const colors = [0xbd5eff, 0x39ff14, 0xff0055, 0xeab308, 0xff7700];
+            const uavColor = colors[(i - 1) % colors.length];
+            uav.children.forEach(mesh => {
+                if (mesh.material) mesh.material.color.setHex(uavColor);
+            });
+        }
+        uav.visible = false;
+        scene.add(uav);
+        uavModels.push(uav);
     }
-    let currentSegmentIndex = 0;
-    let t = 0.0;
-    const speed = 0.04;
+
+    const flightCurves = finalPaths.map(path => {
+        const points = path.map(node => new THREE.Vector3(node.x, node.z, node.y));
+        return new THREE.CatmullRomCurve3(points);
+    });
+
+    let u = 0.0;
+    const speed = 0.0015;
+    const delayOffset = finalPaths.length > 1 ? 0.0 : 0.08;
+
+    const prevYaws = new Array(uavCount).fill(0);
+    const isFirstFrames = new Array(uavCount).fill(true);
 
     function animateFlight() {
-        if (currentSegmentIndex >= finalPath.length - 1) {
-            uavModel.position.set(
-                finalPath[finalPath.length - 1].x,
-                finalPath[finalPath.length - 1].z,
-                finalPath[finalPath.length - 1].y
-            );
-            return;
+        u += speed;
+
+        const lastUavProgress = u - (uavCount - 1) * delayOffset;
+        if (lastUavProgress > 1.0) {
+            u = 0.0;
+            isFirstFrames.fill(true);
         }
-        const nodeA = finalPath[currentSegmentIndex];
-        const nodeB = finalPath[currentSegmentIndex + 1];
 
-        const px = nodeA.x + (nodeB.x - nodeA.x) * t;
-        const py = nodeA.y + (nodeB.y - nodeA.y) * t;
-        const pz = nodeA.z + (nodeB.z - nodeA.z) * t;
-        uavModel.position.set(px, pz, py);
+        for (let i = 0; i < uavCount; i++) {
+            const uav = uavModels[i];
+            const u_i = u - i * delayOffset;
 
-        let psiA = nodeA.psi;
-        let psiB = nodeB.psi;
-        let diff = psiB - psiA;
-        diff = ((diff + Math.PI) % (2 * Math.PI)) - Math.PI;
-        const currentPsi = psiA + diff * t;
+            if (u_i >= 0.0 && u_i <= 1.0) {
+                uav.visible = true;
+                const curve = flightCurves[i % flightCurves.length];
+                const pos = curve.getPointAt(u_i);
+                
+                const altitudeOffset = i * 1.2;
+                uav.position.set(pos.x, pos.y + altitudeOffset, pos.z);
 
-        const dx = nodeB.x - nodeA.x;
-        const dy = nodeB.y - nodeA.y;
-        const dz = nodeB.z - nodeA.z;
-        const d2d = Math.sqrt(dx * dx + dy * dy);
-        const pitch = Math.atan2(dz, d2d);
-        const roll = -diff * 0.8;
+                const tangent = curve.getTangentAt(u_i).normalize();
+                const target = new THREE.Vector3(pos.x, pos.y + altitudeOffset, pos.z).add(tangent);
+                uav.lookAt(target);
 
-        uavModel.rotation.set(pitch, currentPsi, roll, 'YXZ');
-        t += speed;
-        if (t >= 1.0) {
-            t = 0.0;
-            currentSegmentIndex++;
+                const currentYaw = Math.atan2(tangent.x, tangent.z);
+                if (isFirstFrames[i]) {
+                    prevYaws[i] = currentYaw;
+                    isFirstFrames[i] = false;
+                }
+
+                let yawDiff = currentYaw - prevYaws[i];
+                yawDiff = ((yawDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+
+                const bankAngle = Math.max(-0.6, Math.min(0.6, yawDiff * 12.0));
+                uav.rotateOnAxis(new THREE.Vector3(0, 0, 1), bankAngle);
+
+                prevYaws[i] = currentYaw;
+            } else {
+                uav.visible = false;
+            }
         }
         flightAnimationId = requestAnimationFrame(animateFlight);
     }
     animateFlight();
 }
 
-// Display results metrics in Stats and Waypoints Table
-function populateResults(elapsedTime) {
+function populateResults(elapsedTime, totalNodes) {
     updateStatus('SUCCESS', 'text-success');
-    const totalNodes = treeNodes.length;
+    if (totalNodes === undefined) totalNodes = treeNodes.length;
+    document.getElementById('treeNodesVal').textContent = totalNodes;
+    document.getElementById('timeVal').textContent = Math.round(elapsedTime) + ' ms';
+
+    const uavSelectContainer = document.getElementById('uavSelectContainer');
+    const uavPathSelect = document.getElementById('uavPathSelect');
+    
+    if (uavSelectContainer && uavPathSelect) {
+        if (finalPaths.length > 1) {
+            uavPathSelect.innerHTML = '';
+            const colorNames = ["Cyan", "Purple", "Green", "Pink", "Yellow", "Orange"];
+            finalPaths.forEach((path, idx) => {
+                const option = document.createElement('option');
+                option.value = idx;
+                option.textContent = `UAV ${idx + 1} (${colorNames[idx % colorNames.length]})`;
+                uavPathSelect.appendChild(option);
+            });
+            uavSelectContainer.style.display = 'flex';
+            uavPathSelect.onchange = () => displayPathStatsAndTable(parseInt(uavPathSelect.value));
+        } else {
+            uavSelectContainer.style.display = 'none';
+        }
+    }
+    displayPathStatsAndTable(0);
+    document.getElementById('btnSimulate').disabled = false;
+}
+
+function displayPathStatsAndTable(pathIndex) {
+    if (finalPaths.length === 0 || !finalPaths[pathIndex]) return;
+    const finalPath = finalPaths[pathIndex];
     const pathCost = finalPath[finalPath.length - 1].cost;
     const waypointsCount = finalPath.length;
 
@@ -571,8 +654,6 @@ function populateResults(elapsedTime) {
 
     document.getElementById('costVal').textContent = pathCost.toFixed(2) + ' m';
     document.getElementById('waypointsVal').textContent = waypointsCount;
-    document.getElementById('treeNodesVal').textContent = totalNodes;
-    document.getElementById('timeVal').textContent = Math.round(elapsedTime) + ' ms';
     document.getElementById('efficiencyVal').textContent = efficiency.toFixed(1) + '%';
 
     const tbody = document.querySelector('#waypointTable tbody');
@@ -580,9 +661,7 @@ function populateResults(elapsedTime) {
 
     for (let idx = 0; idx < finalPath.length; idx++) {
         const nd = finalPath[idx];
-        let dYawDeg = 0.0;
-        let dPitchDeg = 0.0;
-        let dDist = 0.0;
+        let dYawDeg = 0.0, dPitchDeg = 0.0, dDist = 0.0;
 
         if (idx > 0) {
             const prev = finalPath[idx - 1];
@@ -598,21 +677,18 @@ function populateResults(elapsedTime) {
         }
 
         const tr = document.createElement('tr');
-        const tag = idx === 0 ? ' <span style=\'color:#22c55e\'>(Start)</span>' : (idx === finalPath.length - 1 ? ' <span style=\'color:#eab308\'>(Goal)</span>' : '');
+        const tag = idx === 0 ? ' <span style="color:#22c55e">(Start)</span>' : (idx === finalPath.length - 1 ? ' <span style="color:#eab308">(Goal)</span>' : '');
         
-        // Use standard concatenation instead of template literals with backticks to prevent JSON issues
-        tr.innerHTML = '<td>' + (idx + 1) + tag + '</td>' +
-                       '<td>' + nd.x.toFixed(2) + '</td>' +
-                       '<td>' + nd.y.toFixed(2) + '</td>' +
-                       '<td>' + nd.z.toFixed(2) + '</td>' +
-                       '<td>' + mathDegrees(nd.psi).toFixed(1) + '°</td>' +
-                       '<td style=\'color:' + (dYawDeg > 0.1 ? '#bd5eff' : (dYawDeg < -0.1 ? '#00f0ff' : 'inherit')) + '\'>' + (dYawDeg > 0 ? '+' : '') + dYawDeg.toFixed(1) + '°</td>' +
-                       '<td>' + (dPitchDeg > 0 ? '+' : '') + dPitchDeg.toFixed(1) + '°</td>' +
-                       '<td>' + dDist.toFixed(2) + ' m</td>';
-
+        tr.innerHTML = `<td>${idx + 1}${tag}</td>` +
+                       `<td>${nd.x.toFixed(2)}</td>` +
+                       `<td>${nd.y.toFixed(2)}</td>` +
+                       `<td>${nd.z.toFixed(2)}</td>` +
+                       `<td>${mathDegrees(nd.psi).toFixed(1)}°</td>` +
+                       `<td style="color:${dYawDeg > 0.1 ? '#bd5eff' : (dYawDeg < -0.1 ? '#00f0ff' : 'inherit')}">${dYawDeg > 0 ? '+' : ''}${dYawDeg.toFixed(1)}°</td>` +
+                       `<td>${dPitchDeg > 0 ? '+' : ''}${dPitchDeg.toFixed(1)}°</td>` +
+                       `<td>${dDist.toFixed(2)} m</td>`;
         tbody.appendChild(tr);
     }
-    document.getElementById('btnSimulate').disabled = false;
 }
 
 function updateStatus(text, className) {

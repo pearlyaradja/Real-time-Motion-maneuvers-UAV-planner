@@ -9,3 +9,8 @@ __pycache__/
 *.py[cod]
 *.png
 .DS_Store
+
+# Virtual Environments
+venv/
+.venv/
+env/

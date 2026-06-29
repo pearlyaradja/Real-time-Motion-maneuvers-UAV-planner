@@ -79,6 +79,13 @@
                         </div>
                         <input type="range" id="maxPitch" min="5" max="45" value="20" step="5">
                     </div>
+                     <div class="slider-group mt-1">
+                        <div class="slider-header">
+                            <label>UAV Count</label>
+                            <span id="uavCountVal">1</span>
+                        </div>
+                        <input type="range" id="uavCount" min="1" max="8" value="1" step="1">
+                    </div>
                 </section>
 
                 <!-- Section 3: Planner Parameters -->
@@ -118,6 +125,12 @@
                             </div>
                         </div>
                         <input type="range" id="obstacleCount" min="0" max="40" value="15" step="1">
+                    </div>
+                    <div class="toggle-group mt-1" style="margin-top: 15px;">
+                        <label class="toggle-label" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; font-size: 0.9rem; color: #94a3b8;">
+                            <span><i class="fa-solid fa-eye-slash" style="margin-right: 6px; color: #00f0ff;"></i> Hide RRT Tree</span>
+                            <input type="checkbox" id="chkHideTree" style="cursor: pointer; width: 18px; height: 18px; accent-color: #00f0ff;">
+                        </label>
                     </div>
                 </section>
             </div>
@@ -177,7 +190,13 @@
             <!-- Waypoint Table Panel -->
             <section class="table-panel">
                 <div class="table-header">
-                    <h2><i class="fa-solid fa-list-ol"></i> Flight Waypoints</h2>
+                    <div class="title-with-select">
+                        <h2><i class="fa-solid fa-list-ol"></i> Flight Waypoints</h2>
+                        <div id="uavSelectContainer" class="uav-select-wrapper" style="display: none;">
+                            <label for="uavPathSelect">Display Path:</label>
+                            <select id="uavPathSelect" class="styled-select"></select>
+                        </div>
+                    </div>
                     <span class="table-subtitle">Ordered list of motion primitive segments</span>
                 </div>
                 <div class="table-container">
@@ -211,6 +230,6 @@
     
     <!-- Custom Application Modules -->
     <script src="planner.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>
