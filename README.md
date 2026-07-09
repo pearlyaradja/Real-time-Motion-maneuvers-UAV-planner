@@ -70,44 +70,6 @@ pip install matplotlib
 
 ---
 
-### 3. ⚙️ Version 2 - Hybrid C++ Engine + Python GUI
-Designed for performance. This architecture compiles the RRT pathfinding core in C++ for maximum computation speed, while launching a Python Tkinter GUI that listens to the computed path streamed over UDP (port `5005`) and renders it inside an embedded Matplotlib canvas.
-
-```
-[Python GUI]  --launch subprocess(goal X,Y,Z)-->  [C++ rrt_engine]
-[Python GUI]  <--UDP path stream (port 5005)---  [C++ rrt_engine]
-```
-
-#### Prerequisites:
-1. Python 3.x with `matplotlib` installed (`pip install matplotlib`).
-2. A C++ compiler (like `g++`).
-
-#### How to Run:
-1. Open your terminal and go to the `version2_hybrid` folder:
-   ```bash
-   cd version2_hybrid
-   ```
-2. **Compile the C++ Engine:**
-   * **On Windows (MinGW/GCC):**
-     ```bash
-     g++ -std=c++17 -O2 main.cpp -o rrt_engine.exe -lws2_32
-     ```
-     *(The `-lws2_32` flag is mandatory on Windows to link the winsock library for UDP communications).*
-   * **On Linux / macOS:**
-     ```bash
-     g++ -std=c++17 -O2 main.cpp -o rrt_engine
-     ```
-
-3. **Run the visualizer:**
-   ```bash
-   python gui_visualizer.py
-   ```
-
-4. **Troubleshooting Compiler Error:**
-   If you get `g++: command not found` on Windows, you must install a C++ compiler. You can download **MSYS2** from [msys2.org](https://www.msys2.org/), install the gcc toolchain via `pacman -S mingw-w64-ucrt-x86_64-gcc`, and add it to your Windows Environment Variables Path.
-
----
-
 ## 📚 References
 
 This project is based on the following research paper:
