@@ -3,6 +3,7 @@ let obstaclesGroup, treeGroup, pathGroup, markersGroup;
 let uavModels = [];
 let treeNodes = [];
 let finalPaths = [];
+let finalPathUavIndex = []; // finalPaths[i] belongs to UAV number finalPathUavIndex[i] (0-based)
 let finalPath = null;
 let isPlanning = false;
 let animationFrameId = null;
@@ -17,6 +18,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function initUI() {
     const sliders = [
+        { id: 'trimSpeed', valId: 'trimSpeedVal', suffix: ' m/s' },
         { id: 'maxYaw', valId: 'maxYawVal', suffix: '°' },
         { id: 'maxPitch', valId: 'maxPitchVal', suffix: '°' },
         { id: 'safetyBuffer', valId: 'safetyBufferVal', suffix: 'm' },
@@ -29,7 +31,10 @@ function initUI() {
         const valEl = document.getElementById(s.valId);
         sliderEl.addEventListener('input', () => {
             valEl.textContent = sliderEl.value + s.suffix;
-            if (s.id === 'safetyBuffer') {
+            if (s.id === 'trimSpeed') {
+                Dynamics.AIRCRAFT.Vtrim = parseFloat(sliderEl.value);
+                resetSimulator();
+            } else if (s.id === 'safetyBuffer') {
                 updateObstaclesBuffer(parseFloat(sliderEl.value));
             } else if (s.id === 'obstacleCount') {
                 generateRandomObstacles(parseInt(sliderEl.value));
@@ -54,6 +59,8 @@ function initUI() {
     document.getElementById('chkHideTree').addEventListener('change', (e) => {
         treeGroup.visible = !e.target.checked;
     });
+
+    Dynamics.AIRCRAFT.Vtrim = parseFloat(document.getElementById('trimSpeed').value);
 }
 
 function initThreeJS() {
@@ -274,6 +281,7 @@ function drawStartGoalMarkers(start, goal, uavCount = 1) {
 
 function resetSimulator() {
     isPlanning = false;
+    resetStallCounter();
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
     if (flightAnimationId) cancelAnimationFrame(flightAnimationId);
 
@@ -285,6 +293,7 @@ function resetSimulator() {
     uavModels = [];
     treeNodes = [];
     finalPaths = [];
+    finalPathUavIndex = [];
     finalPath = null;
 
     treeGroup.visible = !document.getElementById('chkHideTree').checked;
@@ -295,9 +304,10 @@ function resetSimulator() {
     document.getElementById('treeNodesVal').textContent = '0';
     document.getElementById('timeVal').textContent = '0 ms';
     document.getElementById('efficiencyVal').textContent = '0.0%';
+    document.getElementById('stallRejectsVal').textContent = '0';
 
     const tbody = document.querySelector('#waypointTable tbody');
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-table-msg">Run planner to generate waypoints</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-table-msg">Run planner to generate waypoints</td></tr>';
     document.getElementById('btnSimulate').disabled = true;
 
     const uavSelectContainer = document.getElementById('uavSelectContainer');
@@ -310,109 +320,31 @@ function resetSimulator() {
     drawStartGoalMarkers(conf.start, conf.goal, uavCount);
 }
 
-function runPlannerInstant() {
-    resetSimulator();
-    updateStatus('PLANNING...', 'text-planning');
-    const conf = getPlannerConfig();
-    const uavCount = parseInt(document.getElementById('uavCount').value);
-    const startTime = performance.now();
-
-    const pathColors = [0x00f0ff, 0xbd5eff, 0x39ff14, 0xff0055, 0xeab308, 0xff7700];
-    const spacing = 3.5;
-    const minSeparation = 2.5;
-    let totalNodesCount = 0;
-    let pathsFoundCount = 0;
-
-    for (let uavIdx = 0; uavIdx < uavCount; uavIdx++) {
-        const offset = (uavIdx - (uavCount - 1) / 2) * spacing;
-        const start_i = new Node(conf.start.x, conf.start.y + offset, conf.start.z, conf.start.psi);
-        const goal_i = new Node(conf.goal.x, conf.goal.y + offset, conf.goal.z);
-
-        if (!isNodeValid(start_i, OBSTACLES, conf.safetyBuffer)) {
-            alert(`Warning: UAV ${uavIdx + 1} start position resides inside an obstacle or safety buffer!`);
-            continue;
-        }
-
-        const localTreeNodes = [start_i];
-        let bestGoalNode = null;
-        let minGoalCost = Infinity;
-
-        for (let i = 0; i < conf.maxIter; i++) {
-            const rnd = getRandomNode(goal_i, conf.goalBias);
-            const nearestId = getNearestNodeId(localTreeNodes, rnd);
-            const nearest = localTreeNodes[nearestId];
-
-            const candidates = generatePrimitives(nearest, conf.stepSize, conf.maxYaw, conf.maxPitch);
-            let bestCandidate = null;
-            let minDistToRnd = Infinity;
-
-            for (const cand of candidates) {
-                if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer) &&
-                    checkUavCollision(nearest, cand.candidate, finalPaths, minSeparation)) {
-                    const d = hitungJarak(cand.candidate, rnd);
-                    if (d < minDistToRnd) {
-                        minDistToRnd = d;
-                        bestCandidate = cand.candidate;
-                    }
-                }
-            }
-            if (bestCandidate === null) continue;
-            localTreeNodes.push(bestCandidate);
-            
-            const color = pathColors[uavIdx % pathColors.length];
-            drawTreeBranch(nearest, bestCandidate, color);
-
-            if (hitungJarak(bestCandidate, goal_i) <= conf.goalThreshold) {
-                if (checkCollision(bestCandidate, goal_i, OBSTACLES, conf.safetyBuffer) &&
-                    checkUavCollision(bestCandidate, goal_i, finalPaths, minSeparation)) {
-                    const cost = bestCandidate.cost + hitungJarak(bestCandidate, goal_i);
-                    if (cost < minGoalCost) {
-                        minGoalCost = cost;
-                        bestGoalNode = new Node(goal_i.x, goal_i.y, goal_i.z, bestCandidate.psi);
-                        bestGoalNode.parent = bestCandidate;
-                        bestGoalNode.cost = cost;
-                    }
-                }
-            }
-        }
-
-        if (bestGoalNode) {
-            localTreeNodes.push(bestGoalNode);
-            const path = extractPath(bestGoalNode);
-            finalPaths.push(path);
-            
-            const color = pathColors[uavIdx % pathColors.length];
-            drawOptimalPath(path, color);
-            pathsFoundCount++;
-        }
-        totalNodesCount += localTreeNodes.length;
-    }
-
-    const elapsed = performance.now() - startTime;
-    if (pathsFoundCount > 0) {
-        treeGroup.visible = !document.getElementById('chkHideTree').checked;
-        populateResults(elapsed, totalNodesCount);
-    } else {
-        updateStatus('FAILED (NO PATH)', 'text-failed');
-        document.getElementById('treeNodesVal').textContent = totalNodesCount;
-        document.getElementById('timeVal').textContent = Math.round(elapsed) + ' ms';
-    }
-}
-
-function runPlannerStepped() {
-    resetSimulator();
+/**
+ * Shared RRT expansion loop, batched via requestAnimationFrame so the
+ * browser tab never freezes and the tree/status update live while the
+ * search runs -- regardless of whether it was triggered from "Run
+ * Planner" (large batchSize, finishes fast) or "Animate Tree" (small
+ * batchSize, deliberately slow so you can watch it grow).
+ */
+function runPlannerBatched(batchSize) {
     isPlanning = true;
-    updateStatus('EXPANDING...', 'text-planning');
-    
+    updateStatus('SEARCHING... 0%', 'text-planning');
+
     const conf = getPlannerConfig();
     const uavCount = parseInt(document.getElementById('uavCount').value);
     const startTime = performance.now();
 
-    // Inisialisasi pohon RRT untuk semua UAV agar dapat divisualisasikan bersama
     const trees = [];
     const bestGoalNodes = [];
     const minGoalCosts = [];
     const iters = [];
+    // Only an UAV's ACTUAL flown path (once found) is used to keep later
+    // UAVs clear of it. Using the whole raw search tree here (as before)
+    // meant every failed/unused exploration branch counted as an
+    // "obstacle" for the next UAV, which made it nearly impossible for
+    // UAV 2+ to find any path at all.
+    const solvedPaths = [];
     const pathColors = [0x00f0ff, 0xbd5eff, 0x39ff14, 0xff0055, 0xeab308, 0xff7700];
     const spacing = 3.5;
     const minSeparation = 2.5;
@@ -432,13 +364,12 @@ function runPlannerStepped() {
         bestGoalNodes.push(null);
         minGoalCosts.push(Infinity);
         iters.push(0);
+        solvedPaths.push(null);
     }
-
-    const batchSize = 10; // Jumlah ekspansi per frame untuk setiap UAV
 
     function step() {
         if (!isPlanning) return;
-        
+
         let activeTreesCount = 0;
 
         for (let uavIdx = 0; uavIdx < uavCount; uavIdx++) {
@@ -452,37 +383,65 @@ function runPlannerStepped() {
 
             if (iters[uavIdx] < conf.maxIter) {
                 activeTreesCount++;
-                
+                // Only prior UAVs that have ALREADY found a real path
+                // constrain this one -- computed once per UAV per frame,
+                // not per-candidate, to keep this cheap.
+                const priorSolvedPaths = solvedPaths.slice(0, uavIdx).filter(p => p !== null);
+
                 // Ekspansi satu batch node untuk UAV saat ini
                 for (let b = 0; b < batchSize; b++) {
                     if (iters[uavIdx] >= conf.maxIter) break;
 
                     const rnd = getRandomNode(goal_i, conf.goalBias);
-                    const nearestId = getNearestNodeId(localTreeNodes, rnd);
-                    const nearest = localTreeNodes[nearestId];
 
-                    const candidates = generatePrimitives(nearest, conf.stepSize, conf.maxYaw, conf.maxPitch);
+                    // Retry up to 5 nearest nodes (paper Sect. 6.2 / Algorithm
+                    // 2) instead of giving up on this sample after a single
+                    // collision. The nearest node first tries the analytic
+                    // steer (paper's Steer(), Eq. 3); if THAT nearest node's
+                    // steer collides, we additionally try the fixed agile
+                    // maneuver library from that same node before moving on
+                    // -- mirroring the paper's aggressive-turn-around trigger.
+                    const kNearestIds = getKNearestNodeIds(localTreeNodes, rnd, 5);
                     let bestCandidate = null;
-                    let minDistToRnd = Infinity;
+                    let usedNearest = null;
 
-                    for (const cand of candidates) {
-                        if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer) &&
-                            checkUavCollision(nearest, cand.candidate, trees.slice(0, uavIdx), minSeparation)) {
-                            const d = hitungJarak(cand.candidate, rnd);
-                            if (d < minDistToRnd) {
-                                minDistToRnd = d;
-                                bestCandidate = cand.candidate;
+                    for (let ni = 0; ni < kNearestIds.length; ni++) {
+                        const nearest = localTreeNodes[kNearestIds[ni]];
+                        const analytic = steerAnalytic(nearest, rnd);
+                        if (analytic &&
+                            checkCollision(nearest, analytic, OBSTACLES, conf.safetyBuffer, analytic.subTrajectory) &&
+                            checkUavCollision(nearest, analytic, priorSolvedPaths, minSeparation)) {
+                            bestCandidate = analytic;
+                            usedNearest = nearest;
+                            break;
+                        }
+
+                        if (ni === 0) {
+                            const fallbackCandidates = generatePrimitives(nearest, conf.stepSize, conf.maxYaw, conf.maxPitch);
+                            let fb = null, fbBestD = Infinity;
+                            for (const cand of fallbackCandidates) {
+                                if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer, cand.candidate.subTrajectory) &&
+                                    checkUavCollision(nearest, cand.candidate, priorSolvedPaths, minSeparation)) {
+                                    const d = hitungJarak(cand.candidate, rnd);
+                                    if (d < fbBestD) { fbBestD = d; fb = cand.candidate; }
+                                }
+                            }
+                            if (fb) {
+                                bestCandidate = fb;
+                                usedNearest = nearest;
+                                break;
                             }
                         }
                     }
 
                     if (bestCandidate !== null) {
+                        const nearest = usedNearest;
                         localTreeNodes.push(bestCandidate);
                         drawTreeBranch(nearest, bestCandidate, color);
 
                         if (hitungJarak(bestCandidate, goal_i) <= conf.goalThreshold) {
                             if (checkCollision(bestCandidate, goal_i, OBSTACLES, conf.safetyBuffer) &&
-                                checkUavCollision(bestCandidate, goal_i, trees.slice(0, uavIdx), minSeparation)) {
+                                checkUavCollision(bestCandidate, goal_i, priorSolvedPaths, minSeparation)) {
                                 const cost = bestCandidate.cost + hitungJarak(bestCandidate, goal_i);
                                 if (cost < minGoalCosts[uavIdx]) {
                                     minGoalCosts[uavIdx] = cost;
@@ -490,6 +449,7 @@ function runPlannerStepped() {
                                     goalNode.parent = bestCandidate;
                                     goalNode.cost = cost;
                                     bestGoalNodes[uavIdx] = goalNode;
+                                    solvedPaths[uavIdx] = extractPath(goalNode);
                                 }
                             }
                         }
@@ -499,9 +459,14 @@ function runPlannerStepped() {
             }
         }
 
-        // Tampilkan total node gabungan dari seluruh UAV
+        // Live progress feedback -- this is what was missing before.
         const totalNodes = trees.reduce((sum, t) => sum + t.length, 0);
+        const totalItersDone = iters.reduce((sum, n) => sum + n, 0);
+        const totalBudget = uavCount * conf.maxIter;
+        const pct = totalBudget > 0 ? Math.min(100, Math.round(100 * totalItersDone / totalBudget)) : 100;
         document.getElementById('treeNodesVal').textContent = totalNodes;
+        document.getElementById('stallRejectsVal').textContent = stallRejectCount;
+        updateStatus(`SEARCHING... ${pct}%`, 'text-planning');
 
         if (activeTreesCount > 0) {
             animationFrameId = requestAnimationFrame(step);
@@ -515,16 +480,18 @@ function runPlannerStepped() {
                     trees[uavIdx].push(goalNode);
                     const path = extractPath(goalNode);
                     finalPaths.push(path);
-                    
+                    finalPathUavIndex.push(uavIdx);
+
                     const color = pathColors[uavIdx % pathColors.length];
                     drawOptimalPath(path, color);
                     pathsFoundCount++;
                 }
             }
 
+            document.getElementById('stallRejectsVal').textContent = stallRejectCount;
             if (pathsFoundCount > 0) {
                 treeGroup.visible = !document.getElementById('chkHideTree').checked;
-                populateResults(elapsed, totalNodes);
+                populateResults(elapsed, totalNodes, pathsFoundCount, uavCount);
             } else {
                 updateStatus('FAILED (NO PATH)', 'text-failed');
                 document.getElementById('timeVal').textContent = Math.round(elapsed) + ' ms';
@@ -532,6 +499,22 @@ function runPlannerStepped() {
         }
     }
     step();
+}
+
+// "Run Planner": big batch per animation frame -- finishes fast, but still
+// yields to the browser every frame so the tree visibly grows and the
+// status bar shows live progress instead of freezing the tab.
+function runPlannerInstant() {
+    resetSimulator();
+    runPlannerBatched(60);
+}
+
+// "Animate Tree": small batch per animation frame -- deliberately slow so
+// you can watch each expansion happen, useful for explaining the
+// algorithm.
+function runPlannerStepped() {
+    resetSimulator();
+    runPlannerBatched(10);
 }
 
 // Menggambar garis cabang RRT dengan warna unik masing-masing jalur UAV
@@ -686,8 +669,12 @@ function simulateFlight() {
     animateFlight();
 }
 
-function populateResults(elapsedTime, totalNodes) {
-    updateStatus('SUCCESS', 'text-success');
+function populateResults(elapsedTime, totalNodes, pathsFoundCount, uavCountTotal) {
+    if (pathsFoundCount !== undefined && uavCountTotal !== undefined && pathsFoundCount < uavCountTotal) {
+        updateStatus(`PARTIAL (${pathsFoundCount}/${uavCountTotal} UAVs)`, 'text-planning');
+    } else {
+        updateStatus('SUCCESS', 'text-success');
+    }
     if (totalNodes === undefined) totalNodes = treeNodes.length;
     document.getElementById('treeNodesVal').textContent = totalNodes;
     document.getElementById('timeVal').textContent = Math.round(elapsedTime) + ' ms';
@@ -700,9 +687,11 @@ function populateResults(elapsedTime, totalNodes) {
             uavPathSelect.innerHTML = '';
             const colorNames = ["Cyan", "Purple", "Green", "Pink", "Yellow", "Orange"];
             finalPaths.forEach((path, idx) => {
+                const trueUavNumber = (finalPathUavIndex[idx] !== undefined ? finalPathUavIndex[idx] : idx) + 1;
+                const colorIdx = (finalPathUavIndex[idx] !== undefined ? finalPathUavIndex[idx] : idx) % colorNames.length;
                 const option = document.createElement('option');
                 option.value = idx;
-                option.textContent = `UAV ${idx + 1} (${colorNames[idx % colorNames.length]})`;
+                option.textContent = `UAV ${trueUavNumber} (${colorNames[colorIdx]})`;
                 uavPathSelect.appendChild(option);
             });
             uavSelectContainer.style.display = 'flex';
@@ -756,7 +745,8 @@ function displayPathStatsAndTable(pathIndex) {
 
         const tr = document.createElement('tr');
         const tag = idx === 0 ? ' <span style="color:#22c55e">(Start)</span>' : (idx === finalPath.length - 1 ? ' <span style="color:#eab308">(Goal)</span>' : '');
-        
+        const primLabel = nd.primitiveName || (idx === 0 ? '—' : '(direct)');
+
         tr.innerHTML = `<td>${idx + 1}${tag}</td>` +
                        `<td>${nd.x.toFixed(2)}</td>` +
                        `<td>${nd.y.toFixed(2)}</td>` +
@@ -764,7 +754,8 @@ function displayPathStatsAndTable(pathIndex) {
                        `<td>${mathDegrees(nd.psi).toFixed(1)}°</td>` +
                        `<td style="color:${dYawDeg > 0.1 ? '#bd5eff' : (dYawDeg < -0.1 ? '#00f0ff' : 'inherit')}">${dYawDeg > 0 ? '+' : ''}${dYawDeg.toFixed(1)}°</td>` +
                        `<td>${dPitchDeg > 0 ? '+' : ''}${dPitchDeg.toFixed(1)}°</td>` +
-                       `<td>${dDist.toFixed(2)} m</td>`;
+                       `<td>${dDist.toFixed(2)} m</td>` +
+                       `<td style="color:#94a3b8; font-size:11px;">${primLabel}</td>`;
         tbody.appendChild(tr);
     }
 }

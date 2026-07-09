@@ -65,6 +65,18 @@
                 <!-- Section 2: UAV Limits & Kinematics -->
                 <section class="control-card">
                     <h2><i class="fa-solid fa-sliders"></i> Kinematic Limits</h2>
+                    <p style="font-size:11px; color:var(--text-mute); margin:-6px 0 10px;">
+                        Max Yaw/Pitch below are now advisory only — actual reachable
+                        headings come from integrating the 6-DOF equations of motion
+                        (see Trim Airspeed and Planner Parameters).
+                    </p>
+                    <div class="slider-group">
+                        <div class="slider-header">
+                            <label>Trim Airspeed (6-DOF)</label>
+                            <span id="trimSpeedVal">7.0 m/s</span>
+                        </div>
+                        <input type="range" id="trimSpeed" min="4" max="12" value="7" step="0.5">
+                    </div>
                     <div class="slider-group">
                         <div class="slider-header">
                             <label>Nominal Max Yaw / step</label>
@@ -186,6 +198,10 @@
                     <span class="stat-label">Efficiency</span>
                     <span id="efficiencyVal" class="stat-value">0.0%</span>
                 </div>
+                <div class="stat-box">
+                    <span class="stat-label">Stall Rejects</span>
+                    <span id="stallRejectsVal" class="stat-value">0</span>
+                </div>
             </section>
 
             <!-- 3D WebGL Canvas Container -->
@@ -225,11 +241,12 @@
                                 <th>dYaw</th>
                                 <th>dPitch</th>
                                 <th>Seg. Distance</th>
+                                <th>Primitive (6-DOF)</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
-                                <td colspan="8" class="empty-table-msg">Run planner to generate waypoints</td>
+                                <td colspan="9" class="empty-table-msg">Run planner to generate waypoints</td>
                             </tr>
                         </tbody>
                     </table>
@@ -243,7 +260,8 @@
     <script src="OrbitControls.js"></script>
     
     <!-- Custom Application Modules -->
+    <script src="dynamics.js"></script>
     <script src="planner.js"></script>
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
 </body>
 </html>
