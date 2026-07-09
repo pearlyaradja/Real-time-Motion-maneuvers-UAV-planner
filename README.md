@@ -105,3 +105,18 @@ Designed for performance. This architecture compiles the RRT pathfinding core in
 
 4. **Troubleshooting Compiler Error:**
    If you get `g++: command not found` on Windows, you must install a C++ compiler. You can download **MSYS2** from [msys2.org](https://www.msys2.org/), install the gcc toolchain via `pacman -S mingw-w64-ucrt-x86_64-gcc`, and add it to your Windows Environment Variables Path.
+
+---
+
+## 📚 References
+
+This project is based on the following research paper:
+
+> J. M. Levin, M. Nahon, and A. A. Paranjape, "Real-time motion planning with a fixed-wing UAV using an agile maneuver space," *Autonomous Robots*, vol. 43, no. 8, pp. 2111–2130, Springer Science+Business Media, LLC, part of Springer Nature, 2019. DOI: [10.1007/s10514-019-09863-2](https://doi.org/10.1007/s10514-019-09863-2)
+
+### Key Concepts Implemented from the Paper:
+- **Agile Maneuver Space**: The planner uses a fixed set of motion primitives (maneuvers) per step to discretize the UAV's control inputs, replicating the maneuver-space approach proposed in the paper.
+- **Motion Primitives**: Maneuvers such as *Steady Cruise Straight*, *Standard Left/Right Turn*, *Knife-Edge Sharp Turn*, *Agile Climb/Dive*, and *Agile Climbing Turns* are directly modeled from the agile maneuver categories defined in the paper.
+- **RRT-based Path Planning**: The Rapidly-exploring Random Tree (RRT) algorithm is applied within the maneuver space to find a real-time, collision-free path from start to goal.
+- **Yaw & Pitch Kinematic Constraints**: Maximum yaw and pitch change per step are enforced to respect the UAV's physical turning limits, consistent with the fixed-wing UAV dynamics described in the paper.
+
