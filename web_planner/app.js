@@ -21,7 +21,8 @@ function initUI() {
         { id: 'maxPitch', valId: 'maxPitchVal', suffix: '°' },
         { id: 'safetyBuffer', valId: 'safetyBufferVal', suffix: 'm' },
         { id: 'obstacleCount', valId: 'obstacleCountVal', suffix: '' },
-        { id: 'uavCount', valId: 'uavCountVal', suffix: '' }
+        { id: 'uavCount', valId: 'uavCountVal', suffix: '' },
+        { id: 'flightSpeed', valId: 'flightSpeedVal', suffix: 'x' }
     ];
     sliders.forEach(s => {
         const sliderEl = document.getElementById(s.id);
@@ -33,6 +34,8 @@ function initUI() {
             } else if (s.id === 'obstacleCount') {
                 generateRandomObstacles(parseInt(sliderEl.value));
                 updateObstaclesBuffer(parseFloat(document.getElementById('safetyBuffer').value));
+                resetSimulator();
+            } else if (s.id === 'uavCount') {
                 resetSimulator();
             }
         });
@@ -234,29 +237,39 @@ function getPlannerConfig() {
     };
 }
 
-function drawStartGoalMarkers(start, goal) {
+function drawStartGoalMarkers(start, goal, uavCount = 1) {
     while(markersGroup.children.length > 0) {
         markersGroup.remove(markersGroup.children[0]);
     }
-    const startGeom = new THREE.SphereGeometry(1.2, 16, 16);
-    const startMat = new THREE.MeshPhongMaterial({ color: 0x22c55e, emissive: 0x052e16 });
-    const startMesh = new THREE.Mesh(startGeom, startMat);
-    startMesh.position.set(start.x, start.z, start.y);
-    markersGroup.add(startMesh);
+    const pathColors = [0x00f0ff, 0xbd5eff, 0x39ff14, 0xff0055, 0xeab308, 0xff7700];
+    const spacing = 3.5;
 
-    const goalGeom = new THREE.SphereGeometry(1.5, 16, 16);
-    const goalMat = new THREE.MeshPhongMaterial({ color: 0xeab308, emissive: 0x422006 });
-    const goalMesh = new THREE.Mesh(goalGeom, goalMat);
-    goalMesh.position.set(goal.x, goal.z, goal.y);
-    markersGroup.add(goalMesh);
+    for (let i = 0; i < uavCount; i++) {
+        const offset = (i - (uavCount - 1) / 2) * spacing;
+        const start_i = { x: start.x, y: start.y + offset, z: start.z };
+        const goal_i = { x: goal.x, y: goal.y + offset, z: goal.z };
+        const color = pathColors[i % pathColors.length];
 
-    const threshGeom = new THREE.SphereGeometry(parseFloat(document.getElementById('goalThreshold').value), 16, 8);
-    const threshWire = new THREE.LineSegments(
-        new THREE.EdgesGeometry(threshGeom),
-        new THREE.LineBasicMaterial({ color: 0xeab308, transparent: true, opacity: 0.15 })
-    );
-    threshWire.position.set(goal.x, goal.z, goal.y);
-    markersGroup.add(threshWire);
+        const startGeom = new THREE.SphereGeometry(1.0, 16, 16);
+        const startMat = new THREE.MeshPhongMaterial({ color: color, emissive: 0x052e16 });
+        const startMesh = new THREE.Mesh(startGeom, startMat);
+        startMesh.position.set(start_i.x, start_i.z, start_i.y);
+        markersGroup.add(startMesh);
+
+        const goalGeom = new THREE.SphereGeometry(1.2, 16, 16);
+        const goalMat = new THREE.MeshPhongMaterial({ color: color, emissive: 0x422006 });
+        const goalMesh = new THREE.Mesh(goalGeom, goalMat);
+        goalMesh.position.set(goal_i.x, goal_i.z, goal_i.y);
+        markersGroup.add(goalMesh);
+
+        const threshGeom = new THREE.SphereGeometry(parseFloat(document.getElementById('goalThreshold').value), 16, 8);
+        const threshWire = new THREE.LineSegments(
+            new THREE.EdgesGeometry(threshGeom),
+            new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.12 })
+        );
+        threshWire.position.set(goal_i.x, goal_i.z, goal_i.y);
+        markersGroup.add(threshWire);
+    }
 }
 
 function resetSimulator() {
@@ -293,7 +306,8 @@ function resetSimulator() {
     }
 
     const conf = getPlannerConfig();
-    drawStartGoalMarkers(conf.start, conf.goal);
+    const uavCount = parseInt(document.getElementById('uavCount').value);
+    drawStartGoalMarkers(conf.start, conf.goal, uavCount);
 }
 
 function runPlannerInstant() {
@@ -303,23 +317,28 @@ function runPlannerInstant() {
     const uavCount = parseInt(document.getElementById('uavCount').value);
     const startTime = performance.now();
 
-    if (!isNodeValid(conf.start, OBSTACLES, conf.safetyBuffer)) {
-        updateStatus('FAILED (START IN OBS)', 'text-failed');
-        alert('Error: Start position resides inside an obstacle or its safety buffer!');
-        return;
-    }
-
     const pathColors = [0x00f0ff, 0xbd5eff, 0x39ff14, 0xff0055, 0xeab308, 0xff7700];
+    const spacing = 3.5;
+    const minSeparation = 2.5;
     let totalNodesCount = 0;
     let pathsFoundCount = 0;
 
     for (let uavIdx = 0; uavIdx < uavCount; uavIdx++) {
-        const localTreeNodes = [conf.start];
+        const offset = (uavIdx - (uavCount - 1) / 2) * spacing;
+        const start_i = new Node(conf.start.x, conf.start.y + offset, conf.start.z, conf.start.psi);
+        const goal_i = new Node(conf.goal.x, conf.goal.y + offset, conf.goal.z);
+
+        if (!isNodeValid(start_i, OBSTACLES, conf.safetyBuffer)) {
+            alert(`Warning: UAV ${uavIdx + 1} start position resides inside an obstacle or safety buffer!`);
+            continue;
+        }
+
+        const localTreeNodes = [start_i];
         let bestGoalNode = null;
         let minGoalCost = Infinity;
 
         for (let i = 0; i < conf.maxIter; i++) {
-            const rnd = getRandomNode(conf.goal, conf.goalBias);
+            const rnd = getRandomNode(goal_i, conf.goalBias);
             const nearestId = getNearestNodeId(localTreeNodes, rnd);
             const nearest = localTreeNodes[nearestId];
 
@@ -328,7 +347,8 @@ function runPlannerInstant() {
             let minDistToRnd = Infinity;
 
             for (const cand of candidates) {
-                if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer)) {
+                if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer) &&
+                    checkUavCollision(nearest, cand.candidate, finalPaths, minSeparation)) {
                     const d = hitungJarak(cand.candidate, rnd);
                     if (d < minDistToRnd) {
                         minDistToRnd = d;
@@ -338,14 +358,17 @@ function runPlannerInstant() {
             }
             if (bestCandidate === null) continue;
             localTreeNodes.push(bestCandidate);
-            drawTreeBranch(nearest, bestCandidate);
+            
+            const color = pathColors[uavIdx % pathColors.length];
+            drawTreeBranch(nearest, bestCandidate, color);
 
-            if (hitungJarak(bestCandidate, conf.goal) <= conf.goalThreshold) {
-                if (checkCollision(bestCandidate, conf.goal, OBSTACLES, conf.safetyBuffer)) {
-                    const cost = bestCandidate.cost + hitungJarak(bestCandidate, conf.goal);
+            if (hitungJarak(bestCandidate, goal_i) <= conf.goalThreshold) {
+                if (checkCollision(bestCandidate, goal_i, OBSTACLES, conf.safetyBuffer) &&
+                    checkUavCollision(bestCandidate, goal_i, finalPaths, minSeparation)) {
+                    const cost = bestCandidate.cost + hitungJarak(bestCandidate, goal_i);
                     if (cost < minGoalCost) {
                         minGoalCost = cost;
-                        bestGoalNode = new Node(conf.goal.x, conf.goal.y, conf.goal.z, bestCandidate.psi);
+                        bestGoalNode = new Node(goal_i.x, goal_i.y, goal_i.z, bestCandidate.psi);
                         bestGoalNode.parent = bestCandidate;
                         bestGoalNode.cost = cost;
                     }
@@ -380,74 +403,128 @@ function runPlannerStepped() {
     resetSimulator();
     isPlanning = true;
     updateStatus('EXPANDING...', 'text-planning');
+    
     const conf = getPlannerConfig();
+    const uavCount = parseInt(document.getElementById('uavCount').value);
     const startTime = performance.now();
 
-    if (!isNodeValid(conf.start, OBSTACLES, conf.safetyBuffer)) {
-        updateStatus('FAILED (START IN OBS)', 'text-failed');
-        alert('Error: Start position resides inside an obstacle or its safety buffer!');
-        return;
+    // Inisialisasi pohon RRT untuk semua UAV agar dapat divisualisasikan bersama
+    const trees = [];
+    const bestGoalNodes = [];
+    const minGoalCosts = [];
+    const iters = [];
+    const pathColors = [0x00f0ff, 0xbd5eff, 0x39ff14, 0xff0055, 0xeab308, 0xff7700];
+    const spacing = 3.5;
+    const minSeparation = 2.5;
+    const goalNodes = [];
+
+    for (let i = 0; i < uavCount; i++) {
+        const offset = (i - (uavCount - 1) / 2) * spacing;
+        const start_i = new Node(conf.start.x, conf.start.y + offset, conf.start.z, conf.start.psi);
+        const goal_i = new Node(conf.goal.x, conf.goal.y + offset, conf.goal.z);
+        goalNodes.push(goal_i);
+
+        if (!isNodeValid(start_i, OBSTACLES, conf.safetyBuffer)) {
+            alert(`Warning: UAV ${i + 1} start position resides inside an obstacle or safety buffer!`);
+        }
+
+        trees.push([start_i]);
+        bestGoalNodes.push(null);
+        minGoalCosts.push(Infinity);
+        iters.push(0);
     }
 
-    treeNodes = [conf.start];
-    let bestGoalNode = null;
-    let minGoalCost = Infinity;
-    let iter = 0;
-    const batchSize = 15;
+    const batchSize = 10; // Jumlah ekspansi per frame untuk setiap UAV
 
     function step() {
         if (!isPlanning) return;
-        for (let b = 0; b < batchSize; b++) {
-            if (iter >= conf.maxIter) break;
+        
+        let activeTreesCount = 0;
 
-            const rnd = getRandomNode(conf.goal, conf.goalBias);
-            const nearestId = getNearestNodeId(treeNodes, rnd);
-            const nearest = treeNodes[nearestId];
+        for (let uavIdx = 0; uavIdx < uavCount; uavIdx++) {
+            const localTreeNodes = trees[uavIdx];
+            const color = pathColors[uavIdx % pathColors.length];
+            const goal_i = goalNodes[uavIdx];
 
-            const candidates = generatePrimitives(nearest, conf.stepSize, conf.maxYaw, conf.maxPitch);
-            let bestCandidate = null;
-            let minDistToRnd = Infinity;
-
-            for (const cand of candidates) {
-                if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer)) {
-                    const d = hitungJarak(cand.candidate, rnd);
-                    if (d < minDistToRnd) {
-                        minDistToRnd = d;
-                        bestCandidate = cand.candidate;
-                    }
-                }
+            if (!isNodeValid(localTreeNodes[0], OBSTACLES, conf.safetyBuffer)) {
+                continue;
             }
-            if (bestCandidate !== null) {
-                treeNodes.push(bestCandidate);
-                drawTreeBranch(nearest, bestCandidate);
 
-                if (hitungJarak(bestCandidate, conf.goal) <= conf.goalThreshold) {
-                    if (checkCollision(bestCandidate, conf.goal, OBSTACLES, conf.safetyBuffer)) {
-                        const cost = bestCandidate.cost + hitungJarak(bestCandidate, conf.goal);
-                        if (cost < minGoalCost) {
-                            minGoalCost = cost;
-                            bestGoalNode = new Node(conf.goal.x, conf.goal.y, conf.goal.z, bestCandidate.psi);
-                            bestGoalNode.parent = bestCandidate;
-                            bestGoalNode.cost = cost;
+            if (iters[uavIdx] < conf.maxIter) {
+                activeTreesCount++;
+                
+                // Ekspansi satu batch node untuk UAV saat ini
+                for (let b = 0; b < batchSize; b++) {
+                    if (iters[uavIdx] >= conf.maxIter) break;
+
+                    const rnd = getRandomNode(goal_i, conf.goalBias);
+                    const nearestId = getNearestNodeId(localTreeNodes, rnd);
+                    const nearest = localTreeNodes[nearestId];
+
+                    const candidates = generatePrimitives(nearest, conf.stepSize, conf.maxYaw, conf.maxPitch);
+                    let bestCandidate = null;
+                    let minDistToRnd = Infinity;
+
+                    for (const cand of candidates) {
+                        if (checkCollision(nearest, cand.candidate, OBSTACLES, conf.safetyBuffer) &&
+                            checkUavCollision(nearest, cand.candidate, trees.slice(0, uavIdx), minSeparation)) {
+                            const d = hitungJarak(cand.candidate, rnd);
+                            if (d < minDistToRnd) {
+                                minDistToRnd = d;
+                                bestCandidate = cand.candidate;
+                            }
                         }
                     }
+
+                    if (bestCandidate !== null) {
+                        localTreeNodes.push(bestCandidate);
+                        drawTreeBranch(nearest, bestCandidate, color);
+
+                        if (hitungJarak(bestCandidate, goal_i) <= conf.goalThreshold) {
+                            if (checkCollision(bestCandidate, goal_i, OBSTACLES, conf.safetyBuffer) &&
+                                checkUavCollision(bestCandidate, goal_i, trees.slice(0, uavIdx), minSeparation)) {
+                                const cost = bestCandidate.cost + hitungJarak(bestCandidate, goal_i);
+                                if (cost < minGoalCosts[uavIdx]) {
+                                    minGoalCosts[uavIdx] = cost;
+                                    const goalNode = new Node(goal_i.x, goal_i.y, goal_i.z, bestCandidate.psi);
+                                    goalNode.parent = bestCandidate;
+                                    goalNode.cost = cost;
+                                    bestGoalNodes[uavIdx] = goalNode;
+                                }
+                            }
+                        }
+                    }
+                    iters[uavIdx]++;
                 }
             }
-            iter++;
         }
-        document.getElementById('treeNodesVal').textContent = treeNodes.length;
 
-        if (iter < conf.maxIter) {
+        // Tampilkan total node gabungan dari seluruh UAV
+        const totalNodes = trees.reduce((sum, t) => sum + t.length, 0);
+        document.getElementById('treeNodesVal').textContent = totalNodes;
+
+        if (activeTreesCount > 0) {
             animationFrameId = requestAnimationFrame(step);
         } else {
             const elapsed = performance.now() - startTime;
-            if (bestGoalNode) {
-                treeNodes.push(bestGoalNode);
-                finalPath = extractPath(bestGoalNode);
-                finalPaths.push(finalPath);
+            let pathsFoundCount = 0;
+
+            for (let uavIdx = 0; uavIdx < uavCount; uavIdx++) {
+                const goalNode = bestGoalNodes[uavIdx];
+                if (goalNode) {
+                    trees[uavIdx].push(goalNode);
+                    const path = extractPath(goalNode);
+                    finalPaths.push(path);
+                    
+                    const color = pathColors[uavIdx % pathColors.length];
+                    drawOptimalPath(path, color);
+                    pathsFoundCount++;
+                }
+            }
+
+            if (pathsFoundCount > 0) {
                 treeGroup.visible = !document.getElementById('chkHideTree').checked;
-                drawOptimalPath(finalPath, 0x00f0ff);
-                populateResults(elapsed, treeNodes.length);
+                populateResults(elapsed, totalNodes);
             } else {
                 updateStatus('FAILED (NO PATH)', 'text-failed');
                 document.getElementById('timeVal').textContent = Math.round(elapsed) + ' ms';
@@ -457,16 +534,17 @@ function runPlannerStepped() {
     step();
 }
 
-function drawTreeBranch(fromNode, toNode) {
+// Menggambar garis cabang RRT dengan warna unik masing-masing jalur UAV
+function drawTreeBranch(fromNode, toNode, color = 0x93c5fd) {
     const points = [
         new THREE.Vector3(fromNode.x, fromNode.z, fromNode.y),
         new THREE.Vector3(toNode.x, toNode.z, toNode.y)
     ];
     const geom = new THREE.BufferGeometry().setFromPoints(points);
     const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
-        color: 0x93c5fd,
+        color: color,
         transparent: true,
-        opacity: 0.35
+        opacity: 0.25
     }));
     treeGroup.add(line);
 }
@@ -555,7 +633,8 @@ function simulateFlight() {
     });
 
     let u = 0.0;
-    const speed = 0.0015;
+    const speedMultiplier = parseFloat(document.getElementById('flightSpeed').value);
+    const speed = 0.001 * speedMultiplier;
     const delayOffset = finalPaths.length > 1 ? 0.0 : 0.08;
 
     const prevYaws = new Array(uavCount).fill(0);
@@ -579,11 +658,10 @@ function simulateFlight() {
                 const curve = flightCurves[i % flightCurves.length];
                 const pos = curve.getPointAt(u_i);
                 
-                const altitudeOffset = i * 1.2;
-                uav.position.set(pos.x, pos.y + altitudeOffset, pos.z);
+                uav.position.set(pos.x, pos.y, pos.z);
 
                 const tangent = curve.getTangentAt(u_i).normalize();
-                const target = new THREE.Vector3(pos.x, pos.y + altitudeOffset, pos.z).add(tangent);
+                const target = new THREE.Vector3(pos.x, pos.y, pos.z).add(tangent);
                 uav.lookAt(target);
 
                 const currentYaw = Math.atan2(tangent.x, tangent.z);

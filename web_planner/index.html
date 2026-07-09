@@ -86,6 +86,20 @@
                         </div>
                         <input type="range" id="uavCount" min="1" max="8" value="1" step="1">
                     </div>
+                     <div class="slider-group mt-1">
+                        <div class="slider-header">
+                            <label>Flight Speed</label>
+                            <span id="flightSpeedVal">1.5x</span>
+                        </div>
+                        <input type="range" id="flightSpeed" min="0.5" max="5.0" value="1.5" step="0.5">
+                    </div>
+                     <div class="slider-group mt-1">
+                        <div class="slider-header">
+                            <label>Departure Delay</label>
+                            <span id="departureDelayVal">1.0s</span>
+                        </div>
+                        <input type="range" id="departureDelay" min="0.0" max="4.0" value="1.0" step="0.2">
+                    </div>
                 </section>
 
                 <!-- Section 3: Planner Parameters -->
@@ -224,9 +238,9 @@
         </main>
     </div>
 
-    <!-- Loaded Three.js and OrbitControls via CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Loaded Three.js and OrbitControls locally -->
+    <script src="three.min.js"></script>
+    <script src="OrbitControls.js"></script>
     
     <!-- Custom Application Modules -->
     <script src="planner.js"></script>

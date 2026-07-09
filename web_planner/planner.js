@@ -184,6 +184,33 @@ function isNodeValid(node, obstacles, buffer) {
     return true;
 }
 
+// Memeriksa apakah segmen baru terlalu dekat dengan jalur UAV lain yang sudah ada
+function checkUavCollision(fromNode, toNode, existingPaths, minSeparation) {
+    const dist = hitungJarak(fromNode, toNode);
+    const steps = Math.max(2, Math.floor(dist / 0.5));
+
+    for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const x = fromNode.x + (toNode.x - fromNode.x) * t;
+        const y = fromNode.y + (toNode.y - fromNode.y) * t;
+        const z = fromNode.z + (toNode.z - fromNode.z) * t;
+
+        for (const path of existingPaths) {
+            for (const otherNode of path) {
+                const d = Math.sqrt(
+                    Math.pow(x - otherNode.x, 2) +
+                    Math.pow(y - otherNode.y, 2) +
+                    Math.pow(z - otherNode.z, 2)
+                );
+                if (d < minSeparation) {
+                    return false; // Terlalu dekat dengan jalur UAV lain (tabrakan)
+                }
+            }
+        }
+    }
+    return true; // Aman
+}
+
 function extractPath(goalNode) {
     const path = [];
     let current = goalNode;
